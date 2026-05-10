@@ -1,0 +1,27 @@
+# Keil build outputs
+Objects/
+Listings/
+DebugConfig/
+MDK-ARM/
+*.o
+*.d
+*.crf
+*.dep
+*.axf
+*.hex
+*.lnp
+*.sct
+*.build_log.htm
+*.htm
+
+# IDE
+.vscode/
+*.uvguix.*
+*.uvoptx
+*.scvd
+
+# Archives & temp
+*.rar
+*.bak
+*.tmp
+JLinkLog.txt
