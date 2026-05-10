@@ -25,3 +25,7 @@ MDK-ARM/
 *.bak
 *.tmp
 JLinkLog.txt
+
+# Excluded from repo
+PTZ main control/
+vision/
