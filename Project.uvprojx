@@ -710,6 +710,16 @@
               <FileType>5</FileType>
               <FilePath>.\User\Delay.h</FilePath>
             </File>
+            <File>
+              <FileName>bt.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\bt.c</FilePath>
+            </File>
+            <File>
+              <FileName>bt.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\bt.h</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

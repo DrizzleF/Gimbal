@@ -10,8 +10,11 @@ DISPLAY_HEIGHT = 480
 CENTER_X = DISPLAY_WIDTH // 2
 CENTER_Y = DISPLAY_HEIGHT // 2
 
-# 橙色阈值 (Lab)
-ORANGE_THRESHOLD = (40, 85, 20, 60, 30, 80)
+# 颜色阈值 (Lab) — 蓝牙指令 C0/C1 切换
+THRESHOLDS = {
+    0: (40, 85, 20, 60, 30, 80),    # 橙色
+    1: (25, 80, -55, -15, -10, 40), # 绿色
+}
 
 # 发送间隔 (ms)
 SEND_INTERVAL_MS = 25
@@ -19,6 +22,7 @@ SEND_INTERVAL_MS = 25
 # ==================== 状态 ====================
 last_send = 0
 uart = None
+current_color = 0  # 0=橙, 1=绿
 
 def init_system():
     global uart
@@ -34,7 +38,7 @@ def init_display():
     MediaManager.init()
 
 def main():
-    global last_send, uart
+    global last_send, uart, current_color
 
     try:
         sensor = init_system()
@@ -46,12 +50,24 @@ def main():
             clock.tick()
             img = sensor.snapshot()
 
+            # ---- 接收颜色切换指令 (STM32转发: C0 / C1) ----
+            try:
+                while uart.any():
+                    line = uart.readline()
+                    if line:
+                        s = line.decode().strip()
+                        if s == 'C0': current_color = 0
+                        elif s == 'C1': current_color = 1
+            except:
+                pass
+
             # 十字准心
             img.draw_cross(CENTER_X, CENTER_Y, size=15, thickness=2, color=(0, 255, 0))
             img.draw_circle(CENTER_X, CENTER_Y, 20, color=(0, 255, 0), thickness=1)
 
             # 目标检测
-            blobs = img.find_blobs([ORANGE_THRESHOLD], area_threshold=200, merge=True)
+            threshold = THRESHOLDS[current_color]
+            blobs = img.find_blobs([threshold], area_threshold=200, merge=True)
 
             if blobs:
                 blob = max(blobs, key=lambda b: b[4])
@@ -79,7 +95,9 @@ def main():
 
             # OSD信息
             img.draw_string_advanced(5, 5, 24, state_text, color=state_color)
-            img.draw_string_advanced(5, 30, 18, "X:%d Y:%d" % (bx, by), color=(255, 255, 255))
+            clr_name = "ORANGE" if current_color == 0 else "GREEN"
+            img.draw_string_advanced(5, 30, 18, "X:%d Y:%d %s" % (bx, by, clr_name),
+                                     color=(255, 255, 255))
             img.draw_string_advanced(5, 50, 18, "FPS:%.1f" % clock.fps(), color=(255, 255, 255))
 
             Display.show_image(img)
