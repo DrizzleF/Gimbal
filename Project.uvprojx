@@ -720,6 +720,41 @@
               <FileType>5</FileType>
               <FilePath>.\User\bt.h</FilePath>
             </File>
+            <File>
+              <FileName>stepper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\stepper.c</FilePath>
+            </File>
+            <File>
+              <FileName>stepper.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\stepper.h</FilePath>
+            </File>
+            <File>
+              <FileName>OLED.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\OLED.c</FilePath>
+            </File>
+            <File>
+              <FileName>OLED.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\OLED.h</FilePath>
+            </File>
+            <File>
+              <FileName>OLED_Font.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\OLED_Font.h</FilePath>
+            </File>
+            <File>
+              <FileName>pid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\User\pid.c</FilePath>
+            </File>
+            <File>
+              <FileName>pid.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\User\pid.h</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

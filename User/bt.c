@@ -1,3 +1,20 @@
+/**
+ * @file    bt.c
+ * @brief   蓝牙模块（已废弃）
+ *
+ * ⚠️ 本文件已废弃，不要使用！
+ * USART2 已分配给 Tilt 步进电机 (uart.c UART2_Init)。
+ * 如果同时调用 BT_Init() 和 UART2_Init()，会导致：
+ *   1. USART2 配置被覆盖
+ *   2. USART2_IRQHandler 链接冲突
+ *   3. PA2/PA3 引脚功能冲突
+ *
+ * 如需恢复蓝牙功能，必须将蓝牙移至其他 UART（如 USART3 或 UART4），
+ * 并确保不与 stepper.c 的电机通信冲突。
+ */
+
+#if 0  /* 禁用整个文件 */
+
 #include "bt.h"
 
 #define BT_RX_BUF_SIZE 64
@@ -79,3 +96,5 @@ void BT_SendString(const char *str)
         USART_SendData(USART2, *str++);
     }
 }
+
+#endif /* 禁用整个文件 */

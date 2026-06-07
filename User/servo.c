@@ -39,6 +39,21 @@ void Servo_Init(void)
     TIM_Cmd(TIM2, ENABLE);
 }
 
+void Servo_SetSpeed(uint8_t servo_id, float speed)
+{
+    if (speed < -1.0f) speed = -1.0f;
+    if (speed >  1.0f) speed =  1.0f;
+
+    uint16_t pulse = (uint16_t)(SERVO_360_CENTER + speed * SERVO_360_RANGE);
+
+    if (servo_id == SERVO_PAN)
+        TIM_SetCompare1(TIM2, pulse);
+    else
+        TIM_SetCompare2(TIM2, pulse);
+}
+
+
+
 void Servo_SetAngle(uint8_t servo_id, float angle)
 {
     // Clamp
@@ -53,3 +68,19 @@ void Servo_SetAngle(uint8_t servo_id, float angle)
     else if (servo_id == SERVO_TILT)
         TIM_SetCompare2(TIM2, pulse);
 }
+
+// ==================== 激光笔控制 (PA4) ====================
+
+void Laser_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStructure;
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+    GPIO_ResetBits(GPIOA, GPIO_Pin_4);
+}
+
+void Laser_On(void)  { GPIO_SetBits(GPIOA, GPIO_Pin_4); }
+void Laser_Off(void) { GPIO_ResetBits(GPIOA, GPIO_Pin_4); }

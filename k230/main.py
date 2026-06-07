@@ -1,114 +1,164 @@
-import time
+import time, os, sys, gc, math
 from media.sensor import *
 from media.display import *
 from media.media import *
+import cv_lite
 from ybUtils.YbUart import YbUart
 
 # ==================== 配置 ====================
-DISPLAY_WIDTH = 640
-DISPLAY_HEIGHT = 480
-CENTER_X = DISPLAY_WIDTH // 2
-CENTER_Y = DISPLAY_HEIGHT // 2
+IMAGE_WIDTH  = 640
+IMAGE_HEIGHT = 480
+CENTER_X = IMAGE_WIDTH // 2
+CENTER_Y = IMAGE_HEIGHT // 2
 
-# 颜色阈值 (Lab) — 蓝牙指令 C0/C1 切换
-THRESHOLDS = {
-    0: (40, 85, 20, 60, 30, 80),    # 橙色
-    1: (25, 80, -55, -15, -10, 40), # 绿色
-}
+# 矩形检测参数
+canny_thresh1       = 50
+canny_thresh2       = 150
+approx_epsilon      = 0.04
+area_min_ratio      = 0.001
+max_angle_cos       = 0.3
+gaussian_blur_size  = 5
 
-# 发送间隔 (ms)
-SEND_INTERVAL_MS = 25
+AREA_THRESHOLD      = 2000   # 最小面积阈值（国一方案参考值）
+MIN_EDGE_LEN        = 30     # 每条边最小长度(px)
+EDGE_DIFF_THRESH    = 120    # 对边长度差阈值(px)
+ANGLE_TOLERANCE     = 30     # 平行/垂直判定容差(度)
 
-# ==================== 状态 ====================
-last_send = 0
-uart = None
-current_color = 0  # 0=橙, 1=绿
+def edge_len(x1, y1, x2, y2):
+    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-def init_system():
-    global uart
+def edge_angle(x1, y1, x2, y2):
+    return math.atan2(y2 - y1, x2 - x1)
+
+def angle_diff_deg(a1, a2):
+    d = abs(a1 - a2) % math.pi
+    if d > math.pi / 2:
+        d = math.pi - d
+    return math.degrees(d)
+
+def validate_rect(r):
+    """验证矩形是否合格：对边平行、邻边垂直、边长合格"""
+    x0, y0, x1, y1, x2, y2, x3, y3 = r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]
+    # 四条边长度
+    l01 = edge_len(x0, y0, x1, y1)
+    l12 = edge_len(x1, y1, x2, y2)
+    l23 = edge_len(x2, y2, x3, y3)
+    l30 = edge_len(x3, y3, x0, y0)
+    # 每条边 >= 30px
+    if l01 < MIN_EDGE_LEN or l12 < MIN_EDGE_LEN or l23 < MIN_EDGE_LEN or l30 < MIN_EDGE_LEN:
+        return False
+    # 对边长度差 < 120px
+    if abs(l01 - l23) > EDGE_DIFF_THRESH:
+        return False
+    if abs(l12 - l30) > EDGE_DIFF_THRESH:
+        return False
+    # 对边平行、邻边垂直
+    a01 = edge_angle(x0, y0, x1, y1)
+    a12 = edge_angle(x1, y1, x2, y2)
+    a23 = edge_angle(x2, y2, x3, y3)
+    a30 = edge_angle(x3, y3, x0, y0)
+    # 对边平行: a01 vs a23, a12 vs a30
+    if angle_diff_deg(a01, a23) > ANGLE_TOLERANCE:
+        return False
+    if angle_diff_deg(a12, a30) > ANGLE_TOLERANCE:
+        return False
+    # 邻边垂直: a01 vs a12
+    perp_err = abs(angle_diff_deg(a01, a12) - 90)
+    if perp_err > ANGLE_TOLERANCE:
+        return False
+    return True
+
+# ==================== 主程序 ====================
+sensor = None
+
+try:
     uart = YbUart(baudrate=115200)
+
+    # ---- 初始化 ----
     sensor = Sensor()
     sensor.reset()
-    sensor.set_framesize(width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT)
-    sensor.set_pixformat(Sensor.RGB565)
-    return sensor
+    sensor.set_framesize(width=IMAGE_WIDTH, height=IMAGE_HEIGHT)
+    sensor.set_pixformat(Sensor.GRAYSCALE)
 
-def init_display():
-    Display.init(Display.ST7701, to_ide=True)
+    Display.init(Display.ST7701, width=IMAGE_WIDTH, height=IMAGE_HEIGHT, to_ide=True)
     MediaManager.init()
+    sensor.run()
 
-def main():
-    global last_send, uart, current_color
+    clock = time.clock()
+    image_shape = [IMAGE_HEIGHT, IMAGE_WIDTH]
 
-    try:
-        sensor = init_system()
-        init_display()
-        sensor.run()
-        clock = time.clock()
+    while True:
+        clock.tick()
+        os.exitpoint()
+        img = sensor.snapshot()
+        img_np = img.to_numpy_ref()
 
-        while True:
-            clock.tick()
-            img = sensor.snapshot()
+        # ---- 灰度矩形检测 ----
+        rects = cv_lite.grayscale_find_rectangles_with_corners(
+            image_shape, img_np,
+            canny_thresh1, canny_thresh2,
+            approx_epsilon, area_min_ratio,
+            max_angle_cos, gaussian_blur_size
+        )
 
-            # ---- 接收颜色切换指令 (STM32转发: C0 / C1) ----
-            try:
-                while uart.any():
-                    line = uart.readline()
-                    if line:
-                        s = line.decode().strip()
-                        if s == 'C0': current_color = 0
-                        elif s == 'C1': current_color = 1
-            except:
-                pass
+        target_x = CENTER_X
+        target_y = CENTER_Y
+        found = False
+        area = 0
 
-            # 十字准心
-            img.draw_cross(CENTER_X, CENTER_Y, size=15, thickness=2, color=(0, 255, 0))
-            img.draw_circle(CENTER_X, CENTER_Y, 20, color=(0, 255, 0), thickness=1)
+        if rects:
+            # 取面积最大的合格矩形
+            valid_rects = [r for r in rects if validate_rect(r)]
+            if valid_rects:
+                r = max(valid_rects, key=lambda r: r[2] * r[3])
+                area = r[2] * r[3]
 
-            # 目标检测
-            threshold = THRESHOLDS[current_color]
-            blobs = img.find_blobs([threshold], area_threshold=200, merge=True)
+            if valid_rects and area >= AREA_THRESHOLD:
+                # 对角线交点取靶心
+                target_x = (r[4] + r[8]) // 2
+                target_y = (r[5] + r[9]) // 2
+                found = True
 
-            if blobs:
-                blob = max(blobs, key=lambda b: b[4])
-                bx, by = blob[5], blob[6]
+                # 画矩形框和角点
+                img.draw_rectangle(r[0], r[1], r[2], r[3],
+                                   color=(255, 255, 255), thickness=2)
+                img.draw_cross(r[4],  r[5],  color=(255, 255, 255), size=5, thickness=2)
+                img.draw_cross(r[6],  r[7],  color=(255, 255, 255), size=5, thickness=2)
+                img.draw_cross(r[8],  r[9],  color=(255, 255, 255), size=5, thickness=2)
+                img.draw_cross(r[10], r[11], color=(255, 255, 255), size=5, thickness=2)
 
-                # 绘制识别框
-                img.draw_rectangle(blob[0:4], thickness=3, color=(255, 165, 0))
-                img.draw_cross(bx, by, size=10, thickness=2, color=(255, 165, 0))
-                img.draw_line(CENTER_X, CENTER_Y, bx, by, color=(200, 200, 0), thickness=1)
+        # ---- 发送像素误差 + 有效标志 ----
+        if found:
+            err_x = target_x - CENTER_X
+            err_y = target_y - CENTER_Y
+            uart.write("X%dY%dZ1\n" % (err_x, err_y))
+            print("X%dY%dZ1\n" % (err_x, err_y))
+        else:
+            uart.write("X0Y0Z0\n")
 
-                state_text = "TRACK"
-                state_color = (0, 255, 0)
-            else:
-                bx, by = 0, 0
-                state_text = "LOST"
-                state_color = (255, 0, 0)
+        # ---- 画准星和目标 ----
+        img.draw_cross(target_x, target_y, color=(0, 0, 0), size=10, thickness=2)
+        img.draw_circle(CENTER_X, CENTER_Y, 4, color=(0, 0, 0), thickness=2, fill=False)
 
-            # 定时发送坐标
-            now = time.ticks_ms()
-            if now - last_send > SEND_INTERVAL_MS:
-                if blobs:
-                    cmd = "X%dY%d\n" % (bx, by)
-                    uart.send(cmd)
-                last_send = now
+        # ---- OSD ----
+        img.draw_string_advanced(0, 0, 30, "FPS:%.1f" % clock.fps(), color=(0, 0, 0))
+        if found:
+            img.draw_string_advanced(0, 30, 30, "area:%d" % area, color=(0, 0, 0))
+            img.draw_string_advanced(0, 60, 24, "TRACK", color=(0, 0, 0))
+        else:
+            img.draw_string_advanced(0, 60, 24, "LOST", color=(255, 0, 0))
 
-            # OSD信息
-            img.draw_string_advanced(5, 5, 24, state_text, color=state_color)
-            clr_name = "ORANGE" if current_color == 0 else "GREEN"
-            img.draw_string_advanced(5, 30, 18, "X:%d Y:%d %s" % (bx, by, clr_name),
-                                     color=(255, 255, 255))
-            img.draw_string_advanced(5, 50, 18, "FPS:%.1f" % clock.fps(), color=(255, 255, 255))
+        Display.show_image(img)
+        gc.collect()
 
-            Display.show_image(img)
-
-    except KeyboardInterrupt:
-        print("stop")
-    finally:
-        if 'sensor' in locals():
-            sensor.stop()
-        Display.deinit()
-        MediaManager.deinit()
-
-if __name__ == "__main__":
-    main()
+except KeyboardInterrupt:
+    print("user stop")
+except BaseException as e:
+    print(f"Exception: {e}")
+finally:
+    if isinstance(sensor, Sensor):
+        sensor.stop()
+    Display.deinit()
+    os.exitpoint(os.EXITPOINT_ENABLE_SLEEP)
+    time.sleep_ms(100)
+    MediaManager.deinit()
